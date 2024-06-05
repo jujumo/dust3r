@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dust3r"
+version = "2024.0.0"
+dependencies = [
+ "torch",
+ "torchvision",
+ "roma",
+ "gradio",
+ "matplotlib",
+ "tqdm",
+ "opencv-python",
+ "scipy",
+ "einops",
+ "trimesh",
+ "tensorboard",
+ "pyglet<2",
+ "huggingface-hub[torch]>=0.22"
+]
+requires-python = ">=3.8"
+authors = [
+  {name = "noname", email = "noname@example.com"},
+]
+description = "Lovely!"
+readme = "README.md"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python"
+]
