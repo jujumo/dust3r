@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --recursive https://github.com/naver/dust3r /dust3r
+COPY . /dust3r
 WORKDIR /dust3r
 
 RUN pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu
@@ -32,7 +32,7 @@ RUN pip install opencv-python==4.8.0.74
 
 WORKDIR /dust3r
 
-COPY entrypoint.sh /entrypoint.sh
+COPY docker/files/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

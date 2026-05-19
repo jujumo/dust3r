@@ -1,0 +1,34 @@
+.git
+.gitignore
+.gitmodules
+.dockerignore
+
+# Bind-mounted at runtime, don't ship in the image
+docker/files/checkpoints/
+
+# Top-level data/checkpoints from .gitignore
+data/
+checkpoints/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Editors / caches
+.idea/
+.vscode/
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/

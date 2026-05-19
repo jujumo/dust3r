@@ -5,14 +5,7 @@ set -eux
 # Default model name
 model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth"
 
-check_docker() {
-    if ! command -v docker &>/dev/null; then
-        echo "Docker could not be found. Please install Docker and try again."
-        exit 1
-    fi
-}
-
-download_model_checkpoint() { 
+download_model_checkpoint() {
     if [ -f "./files/checkpoints/${model_name}" ]; then
         echo "Model checkpoint ${model_name} already exists. Skipping download."
         return
@@ -21,23 +14,30 @@ download_model_checkpoint() {
     wget "https://download.europe.naverlabs.com/ComputerVision/DUSt3R/${model_name}" -P ./files/checkpoints
 }
 
-set_dcomp() {
-    if command -v docker-compose &>/dev/null; then
-        dcomp="docker-compose"
-    elif command -v docker &>/dev/null && docker compose version &>/dev/null; then
-        dcomp="docker compose"
-    else
-        echo "Docker Compose could not be found. Please install Docker Compose and try again."
-        exit 1
-    fi
+detect_compose_cmd() {
+    # Prefer podman if available, otherwise fall back to docker.
+    # For each engine, try the standalone "<engine>-compose" binary first,
+    # then the "<engine> compose" subcommand.
+    for engine in podman docker; do
+        command -v "$engine" &>/dev/null || continue
+        if command -v "${engine}-compose" &>/dev/null; then
+            compose_cmd="${engine}-compose"
+            return
+        elif "$engine" compose version &>/dev/null; then
+            compose_cmd="$engine compose"
+            return
+        fi
+    done
+    echo "No compose-capable container engine found. Install podman+podman-compose or docker+docker-compose and try again."
+    exit 1
 }
 
 run_docker() {
     export MODEL=${model_name}
     if [ "$with_cuda" -eq 1 ]; then
-        $dcomp -f docker-compose-cuda.yml up --build
+        $compose_cmd -f docker-compose-cuda.yml up --build
     else
-        $dcomp -f docker-compose-cpu.yml up --build
+        $compose_cmd -f docker-compose-cpu.yml up --build
     fi
 }
 
@@ -59,9 +59,8 @@ done
 
 
 main() {
-    check_docker
     download_model_checkpoint
-    set_dcomp
+    detect_compose_cmd
     run_docker
 }
 
