@@ -32,7 +32,7 @@ RUN pip install opencv-python==4.8.0.74
 
 WORKDIR /dust3r
 
-COPY docker/files/entrypoint.sh /entrypoint.sh
+COPY docker/files/demo-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -148,20 +148,20 @@ To run DUSt3R using Docker, including with NVIDIA CUDA support, follow these ins
 
 ```bash
 cd docker
-bash run.sh --with-cuda --model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+bash demo.sh --with-cuda --model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt"
 ```
 
 Or if you want to run the demo without CUDA support, run the following command:
 
 ```bash 
 cd docker
-bash run.sh --model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+bash demo.sh --model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt"
 ```
 
 By default, `demo.py` is lanched with the option `--local_network`.  
 Visit `http://localhost:7860/` to access the web UI (or replace `localhost` with the machine's name to access it from the network).  
 
-`run.sh` will launch docker-compose using either the [docker-compose-cuda.yml](docker/docker-compose-cuda.yml) or [docker-compose-cpu.ym](docker/docker-compose-cpu.yml) config file, then it starts the demo using [entrypoint.sh](docker/files/entrypoint.sh).
+`demo.sh` will launch docker-compose using either the [docker-compose-cuda.yml](docker/docker-compose-cuda.yml) or [docker-compose-cpu.yml](docker/docker-compose-cpu.yml) config file, then it starts the demo using [demo-entrypoint.sh](docker/files/demo-entrypoint.sh).
 
 
 ![demo](assets/demo.jpg)

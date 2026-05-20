@@ -21,7 +21,7 @@ WORKDIR /dust3r/croco/models/curope/
 RUN python setup.py build_ext --inplace
 
 WORKDIR /dust3r
-COPY docker/files/entrypoint.sh /entrypoint.sh
+COPY docker/files/demo-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
