@@ -1,0 +1,82 @@
+= DUSt3R Docker / Podman setup
+:toc:
+
+This directory bundles everything needed to run the DUSt3R demo or open
+an interactive training shell inside a container. It works with both
+Docker and Podman (auto-detected, Podman preferred).
+
+== Layout
+
+[cols="1,3"]
+|===
+| `demo.sh`                   | Build (if needed) and launch the Gradio demo via `compose up`.
+| `shell.sh`                  | Open an interactive bash shell inside the demo image (for training / manual work).
+| `docker-compose-cuda.yml`   | CUDA service definition. Reserves all host GPUs.
+| `docker-compose-cpu.yml`    | CPU-only service definition. Same image conventions, no GPU.
+| `files/cuda.Dockerfile`     | CUDA image (built on `nvcr.io/nvidia/pytorch:24.01-py3`). Compiles the RoPE CUDA extension at build time.
+| `files/cpu.Dockerfile`      | CPU image (built on `python:3.11-slim`).
+| `files/demo-entrypoint.sh`  | Container entrypoint for `demo.sh`: downloads the checkpoint into the bind-mounted dir if missing, then launches `demo.py`.
+| `files/checkpoints/`        | Host-side checkpoint cache. Bind-mounted at `/dust3r/checkpoints` so weights persist between container runs. Gitignored.
+|===
+
+== Two ways to run
+
+=== `demo.sh` — Gradio web UI
+
+[source,bash]
+----
+bash demo.sh --with-cuda --model_name=DUSt3R_ViTLarge_BaseDecoder_512_dpt
+# drop --with-cuda for the CPU image
+# --engine=docker|podman forces a specific engine
+----
+
+Uses `compose up`. The image has the repo `COPY`'d into it at build time
+(so code edits on the host require a rebuild to take effect). Only the
+checkpoint directory is bind-mounted. Gradio listens on host port
+**37860**.
+
+=== `shell.sh` — interactive shell
+
+[source,bash]
+----
+bash shell.sh              # CUDA shell
+bash shell.sh --cpu        # CPU shell
+bash shell.sh --engine=docker
+----
+
+Uses `compose run --rm`. Adds:
+
+* `-v $REPO_ROOT:/dust3r` — live host repo overlay, so code edits are picked up without rebuilds.
+* `-v /dust3r/croco/models/curope` — anonymous volume that re-masks the curope subdir with the image's contents. Without this, the bind-mount above would hide the in-image-compiled RoPE CUDA `.so` and you'd fall back to the slow PyTorch RoPE (with a warning).
+* `--service-ports` — publishes port 37860 from the compose file, so a `demo.py` launched by hand inside the shell is reachable from the host.
+
+The shell starts in `/dust3r` and can be used for training (see
+`shell.sh`'s own header comments for a CO3D-subset training quickstart).
+
+== Why `docker/files/checkpoints/` is mounted separately
+
+The `compose` files declare an explicit volume `./files/checkpoints:/dust3r/checkpoints`.
+This is required by `demo.sh`, which does NOT bind-mount the host repo
+(the image has the code baked in via `COPY`), so without this volume the
+multi-GB downloaded `.pth` would be lost on every `compose down`.
+
+With `shell.sh` the entire host repo is bind-mounted, so this volume is
+technically redundant — but it still wins the overlay order and ensures
+`/dust3r/checkpoints` always points at the same persistent host directory,
+regardless of whether you came in via `demo.sh` or `shell.sh`.
+
+== Caveats
+
+* **Proxy + Gradio**: on a network with an HTTP proxy (e.g. NLE), set
+  `NO_PROXY=localhost,127.0.0.1` before launching `demo.py`, or Gradio's
+  internal startup probe will be intercepted and fail with HTTP 503.
+* **`--local_network`**: by default Gradio binds to `127.0.0.1` inside
+  the container, which the host port forward can't reach. Use
+  `python3 demo.py --local_network …` to bind `0.0.0.0`.
+* **Editing curope sources**: edits to `croco/models/curope/{kernels.cu,curope.cpp}`
+  are NOT live inside `shell.sh` (shadowed by the anonymous volume).
+  Rebuild the image, or rebuild in-place inside the container:
+  `cd croco/models/curope && python setup.py build_ext --inplace`.
+* **GPU count**: `docker-compose-cuda.yml` reserves `count: all`. If the
+  host has fewer GPUs than your `torchrun --nproc_per_node=N`, you'll
+  get `CUDA error: invalid device ordinal`.
