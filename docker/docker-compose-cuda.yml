@@ -5,7 +5,7 @@ services:
       context: ..
       dockerfile: docker/files/cuda.Dockerfile
     ports:
-      - "7860:7860"
+      - "37860:37860"
     environment:
       - DEVICE=cuda
       - MODEL=${MODEL:-DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth}

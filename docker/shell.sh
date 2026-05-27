@@ -5,8 +5,9 @@
 # docker-compose-{cuda,cpu}.yml).
 #
 # Usage:
-#   bash shell.sh [--cpu]
-#     --cpu   use the CPU image (default: CUDA, requires NVIDIA toolkit)
+#   bash shell.sh [--cpu] [--engine=docker|podman]
+#     --cpu               use the CPU image (default: CUDA, requires NVIDIA toolkit)
+#     --engine=<name>     force docker or podman (default: auto-detect, prefer podman)
 #
 # The host repo is bind-mounted over /dust3r, so:
 #   - code edits are live (no rebuild needed)
@@ -41,10 +42,21 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
 compose_file="docker-compose-cuda.yml"
+forced_engine=""
 for arg in "$@"; do
     case $arg in
         --cpu)
             compose_file="docker-compose-cpu.yml"
+            ;;
+        --engine=*)
+            forced_engine="${arg#*=}"
+            case $forced_engine in
+                docker|podman) ;;
+                *)
+                    echo "Unknown engine: $forced_engine (expected docker or podman)"
+                    exit 1
+                    ;;
+            esac
             ;;
         *)
             echo "Unknown parameter passed: $arg"
@@ -53,11 +65,18 @@ for arg in "$@"; do
     esac
 done
 
-# Pick podman over docker; try standalone "<engine>-compose" then "<engine> compose".
-# (Same logic as demo.sh — duplicated rather than factored to keep each script
-# self-contained.)
+# Pick a compose command. By default prefer podman over docker; --engine=<name>
+# forces a specific engine. For each engine, try "<engine>-compose" then
+# "<engine> compose". (Same logic as demo.sh — duplicated rather than factored
+# to keep each script self-contained.)
 detect_compose_cmd() {
-    for engine in podman docker; do
+    local engines
+    if [ -n "$forced_engine" ]; then
+        engines="$forced_engine"
+    else
+        engines="podman docker"
+    fi
+    for engine in $engines; do
         command -v "$engine" &>/dev/null || continue
         if command -v "${engine}-compose" &>/dev/null; then
             compose_cmd="${engine}-compose"
@@ -67,7 +86,11 @@ detect_compose_cmd() {
             return
         fi
     done
-    echo "No compose-capable container engine found. Install podman+podman-compose or docker+docker-compose and try again."
+    if [ -n "$forced_engine" ]; then
+        echo "Engine '$forced_engine' was requested but no working compose command found for it. Install ${forced_engine}-compose or '${forced_engine} compose'."
+    else
+        echo "No compose-capable container engine found. Install podman+podman-compose or docker+docker-compose and try again."
+    fi
     exit 1
 }
 detect_compose_cmd
