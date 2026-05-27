@@ -12,9 +12,12 @@
 # The host repo is bind-mounted over /dust3r, so:
 #   - code edits are live (no rebuild needed)
 #   - data/ and any outputs you create persist on the host
-#   - the in-image build of croco/models/curope is shadowed; rebuild inside
-#     the container if you need the RoPE CUDA kernels:
-#       cd croco/models/curope && python setup.py build_ext --inplace
+#   - croco/models/curope is masked by an anonymous volume so the image's
+#     compiled RoPE CUDA .so survives the bind-mount. Side effect: edits to
+#     files under croco/models/curope/ are NOT live in the container. If you
+#     change kernels.cu / curope.cpp, rebuild the image (or rebuild in-place
+#     inside the container: cd croco/models/curope && python setup.py \
+#     build_ext --inplace).
 #
 # Inside the shell, follow the README "Training → Demo" section to train on
 # the CO3D single-sequence subset. Quickstart (run on host BEFORE launching
@@ -99,9 +102,15 @@ cd "$SCRIPT_DIR"
 
 # "compose run --rm" gives us a one-shot container with the service's image,
 # build settings, GPU reservation, and volumes — but bash instead of the
-# default entrypoint. The extra -v overlays the live host repo over the
-# image's baked-in /dust3r.
+# default entrypoint. The first -v overlays the live host repo over the
+# image's baked-in /dust3r; the second is an anonymous volume that re-masks
+# croco/models/curope/ with the image's contents, so the .so compiled at
+# build time (which the host repo doesn't have) is visible at runtime.
+# --service-ports publishes the compose file's "ports:" (gradio's 37860) so
+# that a demo started by hand inside the shell is reachable from the host.
 exec $compose_cmd -f "$compose_file" run --rm \
+    --service-ports \
     -v "$REPO_ROOT:/dust3r" \
+    -v "/dust3r/croco/models/curope" \
     --entrypoint bash \
     dust3r-demo
