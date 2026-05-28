@@ -11,6 +11,7 @@ services:
       - MODEL=${MODEL:-DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth}
     volumes:
       - ./files/checkpoints:/dust3r/checkpoints
+    shm_size: '8gb'
     cap_add:
       - IPC_LOCK
       - SYS_RESOURCE
