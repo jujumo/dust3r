@@ -1,20 +1,25 @@
 #!/bin/bash
 #
-# Run a DUSt3R training session in its own container. The actual training
-# command lives in docker/files/train_entrypoint.sh — edit that file on the
-# host to change the training config (bind-mounted, so changes are live
-# without rebuilding the image).
-#
-# Monitor curves by launching docker/tensorboard.sh in another terminal
-# (http://localhost:6006 on the host, or tunnel via ssh).
+# Run a standalone TensorBoard server in its own container. Reuses the
+# dust3r image so no extra dependencies are needed. The host repo is bind-
+# mounted read-only at /dust3r so TensorBoard sees the same checkpoints/
+# directory the training container writes to.
 #
 # Usage:
-#   bash train.sh [--cpu] [--engine=docker|podman]
-#     --cpu               use the CPU image (default: CUDA, requires NVIDIA toolkit)
+#   bash tensorboard.sh [--cpu] [--engine=docker|podman] [--logdir=PATH] [--port=N]
+#     --cpu               use the CPU image (default: CUDA — TB doesn't use the GPU
+#                         but the image name follows whichever compose file you build)
 #     --engine=<name>     force docker or podman (default: auto-detect, prefer podman)
+#     --logdir=<path>     log directory inside the container
+#                         (default: /dust3r/checkpoints — covers all nested output_dirs)
+#     --port=<n>          host port to publish (default: 6006)
 #
-# The host repo is bind-mounted over /dust3r; croco/models/curope is masked
-# by an anonymous volume so the image's compiled RoPE CUDA .so stays visible.
+# Open http://localhost:<port> on the host. To reach it from another machine,
+# tunnel through SSH from your PC:
+#     ssh -fNL 6006:localhost:6006 <server>
+#
+# Run this alongside shell.sh / train.sh — TensorBoard picks up new event
+# files automatically (--reload_interval 5).
 
 set -eu
 
@@ -23,6 +28,8 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
 compose_file="docker-compose-cuda.yml"
 forced_engine=""
+tb_logdir="/dust3r/checkpoints"
+tb_port="6006"
 
 for arg in "$@"; do
     case $arg in
@@ -38,6 +45,12 @@ for arg in "$@"; do
                     exit 1
                     ;;
             esac
+            ;;
+        --logdir=*)
+            tb_logdir="${arg#*=}"
+            ;;
+        --port=*)
+            tb_port="${arg#*=}"
             ;;
         *)
             echo "Unknown parameter passed: $arg"
@@ -72,10 +85,13 @@ detect_compose_cmd() {
 }
 detect_compose_cmd
 
+echo "Starting TensorBoard container — will be available at http://localhost:${tb_port}"
+
 cd "$SCRIPT_DIR"
 
 exec $compose_cmd -f "$compose_file" run --rm \
+    -p "${tb_port}:6006" \
+    -e TB_LOGDIR="$tb_logdir" \
     -v "$REPO_ROOT:/dust3r" \
-    -v "/dust3r/croco/models/curope" \
-    --entrypoint /dust3r/docker/files/train_entrypoint.sh \
+    --entrypoint /dust3r/docker/files/tensorboard_entrypoint.sh \
     dust3r-demo
