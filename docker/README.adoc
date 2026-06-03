@@ -11,6 +11,9 @@ Docker and Podman (auto-detected, Podman preferred).
 |===
 | `demo.sh`                   | Build (if needed) and launch the Gradio demo via `compose up`.
 | `shell.sh`                  | Open an interactive bash shell inside the demo image (for training / manual work).
+| `train.sh`                  | Run the CO3D-subset training smoke-test in its own container via `compose run`.
+| `files/train_entrypoint.sh` | Container entrypoint for `train.sh`: bootstraps prerequisites, then runs `train.py`.
+| `files/prepare_co3d.sh`     | Idempotent one-time bootstrap: downloads + preprocesses the CO3D subset and fetches the CroCo v2 checkpoint (both persist on the host).
 | `docker-compose-cuda.yml`   | CUDA service definition. Reserves all host GPUs.
 | `docker-compose-cpu.yml`    | CPU-only service definition. Same image conventions, no GPU.
 | `files/cuda.Dockerfile`     | CUDA image (built on `nvcr.io/nvidia/pytorch:24.01-py3`). Compiles the RoPE CUDA extension at build time.
@@ -52,6 +55,23 @@ Uses `compose run --rm`. Adds:
 
 The shell starts in `/dust3r` and can be used for training (see
 `shell.sh`'s own header comments for a CO3D-subset training quickstart).
+
+=== `train.sh` — CO3D-subset training smoke-test
+
+[source,bash]
+----
+bash train.sh              # CUDA
+bash train.sh --cpu        # CPU image
+bash train.sh --engine=docker
+----
+
+Uses `compose run --rm` with the host repo bind-mounted, like `shell.sh`.
+On the **first** run it auto-fetches the CO3D single-sequence subset
+(download + preprocess) and the CroCo v2 checkpoint; both persist on the
+host (`data/` and `docker/files/checkpoints/`), so subsequent runs skip the
+download and go straight to training. Edit `files/train_entrypoint.sh` on
+the host to change the training config (it is bind-mounted, no rebuild
+needed).
 
 == Why `docker/files/checkpoints/` is mounted separately
 

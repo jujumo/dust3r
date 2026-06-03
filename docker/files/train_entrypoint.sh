@@ -5,10 +5,16 @@
 #
 # Default is the README smoke-test on the CO3D single-sequence subset.
 # For the full 3-stage curriculum, see README "Our Hyperparameters".
+#
+# Prerequisites (the CO3D subset and the CroCo v2 checkpoint) are
+# bootstrapped automatically on first run by prepare_co3d.sh below; both
+# persist on the host, so later runs skip straight to training.
 
 set -eu
 
 cd /dust3r
+
+/dust3r/docker/files/prepare_co3d.sh
 
 exec python train.py \
     --train_dataset "1000 @ Co3d(split='train', ROOT='data/co3d_subset_processed', aug_crop=16, mask_bg='rand', resolution=224, transform=ColorJitter)" \
