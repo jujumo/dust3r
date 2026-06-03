@@ -3,7 +3,9 @@
 
 This directory bundles everything needed to run the DUSt3R demo or open
 an interactive training shell inside a container. It works with both
-Docker and Podman (auto-detected, Podman preferred).
+Docker and Podman (auto-detected, Podman preferred). For running the
+training on an HPC Slurm cluster there is also an Apptainer-based path
+(see _Running on a Slurm cluster_ below).
 
 == Layout
 
@@ -11,8 +13,10 @@ Docker and Podman (auto-detected, Podman preferred).
 |===
 | `demo.sh`                   | Build (if needed) and launch the Gradio demo via `compose up`.
 | `shell.sh`                  | Open an interactive bash shell inside the demo image (for training / manual work).
-| `train.sh`                  | Run the CO3D-subset training smoke-test in its own container via `compose run`.
-| `files/train_entrypoint.sh` | Container entrypoint for `train.sh`: bootstraps prerequisites, then runs `train.py`.
+| `train.sh`                  | Run the CO3D-subset training smoke-test locally in its own container via `compose run`.
+| `to_apptainer.sh`           | Repack the already-built container image into an Apptainer `.sif` for the cluster (no rebuild).
+| `slurm_train.sh`            | Submit the training to Slurm via `sbatch` + `apptainer exec --nv` (cluster counterpart of `train.sh`).
+| `files/train_entrypoint.sh` | Shared entrypoint for `train.sh` AND `slurm_train.sh`: bootstraps prerequisites, then runs `train.py`.
 | `files/prepare_co3d.sh`     | Idempotent one-time bootstrap: downloads + preprocesses the CO3D subset and fetches the CroCo v2 checkpoint (both persist on the host).
 | `docker-compose-cuda.yml`   | CUDA service definition. Reserves all host GPUs.
 | `docker-compose-cpu.yml`    | CPU-only service definition. Same image conventions, no GPU.
@@ -72,6 +76,68 @@ host (`data/` and `docker/files/checkpoints/`), so subsequent runs skip the
 download and go straight to training. Edit `files/train_entrypoint.sh` on
 the host to change the training config (it is bind-mounted, no rebuild
 needed).
+
+== Running on a Slurm cluster (Apptainer)
+
+`train.sh` runs locally via compose, which does not fit a Slurm cluster:
+compose reserves GPUs with `count: all` (fighting the scheduler) and compute
+nodes usually have no container daemon. The cluster path uses **Apptainer**
+instead — it is daemonless, runs as your user, and `apptainer exec --nv`
+honours the `CUDA_VISIBLE_DEVICES` that Slurm assigns to the job.
+
+Both trainers run the **same** `files/train_entrypoint.sh`, so the training
+config (datasets, model, hyperparameters) lives in one place and the local and
+cluster runs cannot drift apart.
+
+=== Step 1 — build the `.sif` (once)
+
+[source,bash]
+----
+# repacks the image you already built with demo.sh / shell.sh — no rebuild
+APPTAINER_TMPDIR=/home/$USER/dust3r/apptainer-tmp bash to_apptainer.sh
+# --engine=docker|podman, --image=<ref>, --output=<path> override the defaults
+----
+
+Produces `files/dust3r.sif`. It needs ~50 GB of scratch (a ~25 GB intermediate
+OCI tarball plus the unpack), so point `APPTAINER_TMPDIR` at a roomy filesystem
+— **not** `/tmp` — and the script funnels both podman's and apptainer's temp
+dirs there. (This EL9 apptainer build lacks the `containers-storage:`
+transport, so the podman path stages an OCI tarball rather than reading the
+local image store directly; the tarball is removed on exit.)
+
+=== Step 2 — submit the training
+
+[source,bash]
+----
+bash slurm_train.sh
+# override resources via env vars, e.g.:
+PARTITION=gpu GPUS=2 TIME=4:00:00 bash slurm_train.sh
+----
+
+Defaults: partition `debug` (chaos V100 nodes, 1-day cap), account `ffs-3d`,
+1 GPU, 8 CPUs, 48 GB, 12 h walltime. Each is overridable via the env vars
+`SIF PARTITION ACCOUNT GPUS CPUS MEM TIME JOBNAME`; set `ACCOUNT=` (empty) to
+let Slurm pick the default account. Logs land in
+`<repo>/slurm-logs/<jobname>-<jobid>.out`:
+
+[source,bash]
+----
+tail -f ../slurm-logs/dust3r-train-<jobid>.out
+----
+
+Like `train.sh` / `shell.sh`, the live host repo is bind-mounted over `/dust3r`
+(code edits are picked up without rebuilding the `.sif`). The compiled RoPE
+CUDA extension is preserved the same way compose preserves it: on first run the
+script extracts `croco/models/curope` out of the `.sif` into `files/curope/`
+and binds it back over the repo mount, so the in-image `.so` is not shadowed by
+the source-only host submodule (otherwise you would silently fall back to the
+slow PyTorch RoPE). Monitor curves with `tensorboard.sh` pointed at the same
+`checkpoints/` output dir (it is on the bind-mounted host repo).
+
+NOTE: `train_entrypoint.sh` runs a single `python train.py`, so it uses one GPU
+regardless of `GPUS`. For real multi-GPU training switch that line to
+`torchrun --nproc_per_node=$GPUS train.py …` (see the repo-root README
+"Our Hyperparameters").
 
 == Why `docker/files/checkpoints/` is mounted separately
 

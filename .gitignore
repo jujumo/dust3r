@@ -131,3 +131,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Apptainer/Singularity images (large, built from the container image)
+*.sif
+
+# Apptainer/Slurm trainer scratch
+docker/files/curope/
+slurm-logs/
