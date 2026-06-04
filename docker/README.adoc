@@ -17,6 +17,7 @@ training on an HPC Slurm cluster there is also an Apptainer-based path
 | `to_apptainer.sh`           | Repack the already-built container image into an Apptainer `.sif` for the cluster (no rebuild).
 | `slurm_train.sh`            | Submit the training to Slurm via `sbatch` + `apptainer exec --nv` (cluster counterpart of `train.sh`).
 | `files/train_entrypoint.sh` | Shared entrypoint for `train.sh` AND `slurm_train.sh`: bootstraps prerequisites, then runs `train.py`.
+| `files/train_job.sbatch`    | Batch script `slurm_train.sh` submits to `sbatch` (a real file rather than `--wrap`, so `scontrol show job` reports a concrete `Command=` path and TUIs like `slurmer` can display it). Runs `apptainer exec … train_entrypoint.sh`.
 | `files/prepare_co3d.sh`     | Idempotent one-time bootstrap: downloads + preprocesses the CO3D subset and fetches the CroCo v2 checkpoint (both persist on the host).
 | `docker-compose-cuda.yml`   | CUDA service definition. Reserves all host GPUs.
 | `docker-compose-cpu.yml`    | CPU-only service definition. Same image conventions, no GPU.

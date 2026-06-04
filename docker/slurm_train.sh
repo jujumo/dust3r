@@ -77,10 +77,13 @@ mkdir -p "$LOGDIR"
 account_opt=()
 [ -n "$ACCOUNT" ] && account_opt=(--account="$ACCOUNT")
 
-# apptainer exec --nv: --nv injects the host NVIDIA driver/libs and honours
-# the CUDA_VISIBLE_DEVICES that Slurm assigns this job, so the container only
-# sees the allocated GPU(s). The two binds overlay the live host repo over the
-# image's baked-in /dust3r, then re-mask curope with the compiled-.so cache.
+# Submit a real script file (files/train_job.sbatch) rather than `sbatch
+# --wrap=...`. A --wrap job has no on-disk script, so `scontrol show job`
+# reports `Command=(null)` and TUIs like `slurmer` that read that path to show
+# the batch script fail with "Failed to read script from path: (null)". A real
+# file gives a concrete, persistent Command= path. The apptainer binds/image
+# are resolved here and handed to the job via --export; see train_job.sbatch.
+JOB_SCRIPT="$SCRIPT_DIR/files/train_job.sbatch"
 echo "Submitting: partition=$PARTITION account=${ACCOUNT:-<default>} gpus=$GPUS time=$TIME"
 echo "Image     : $SIF"
 echo "Logs      : $LOGDIR/$JOBNAME-<jobid>.out"
@@ -94,7 +97,5 @@ exec sbatch \
     --mem="$MEM" \
     --time="$TIME" \
     --output="$LOGDIR/%x-%j.out" \
-    --wrap="apptainer exec --nv \
-        --bind '$REPO_ROOT':/dust3r \
-        --bind '$CUROPE_CACHE':/dust3r/croco/models/curope \
-        '$SIF' bash /dust3r/docker/files/train_entrypoint.sh"
+    --export="ALL,REPO_ROOT=$REPO_ROOT,SIF=$SIF,CUROPE_CACHE=$CUROPE_CACHE" \
+    "$JOB_SCRIPT"
