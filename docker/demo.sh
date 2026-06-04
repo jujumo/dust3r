@@ -11,13 +11,13 @@
 #     --model_name=<NAME>   checkpoint basename (without .pth), default below
 #     --engine=<name>       force docker or podman (default: auto-detect, prefer podman)
 #
-# The checkpoint is downloaded into ./files/checkpoints/, which the compose
+# The checkpoint is downloaded into ../checkpoints/, which the compose
 # files bind-mount into the container at /dust3r/checkpoints.
 
 # -e: stop on first error, -u: error on unset vars, -x: trace commands.
 set -eux
 
-# Run from the script's own directory so relative paths (./files/checkpoints,
+# Run from the script's own directory so relative paths (../checkpoints,
 # docker-compose-*.yml) resolve regardless of where the user invoked us from.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR"
@@ -28,12 +28,12 @@ model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth"
 # Fetch the checkpoint into the host-side dir that the container bind-mounts.
 # Skipped if the file already exists, so repeated runs are cheap.
 download_model_checkpoint() {
-    if [ -f "./files/checkpoints/${model_name}" ]; then
+    if [ -f "../checkpoints/${model_name}" ]; then
         echo "Model checkpoint ${model_name} already exists. Skipping download."
         return
     fi
     echo "Downloading model checkpoint ${model_name}..."
-    wget "https://download.europe.naverlabs.com/ComputerVision/DUSt3R/${model_name}" -P ./files/checkpoints
+    wget "https://download.europe.naverlabs.com/ComputerVision/DUSt3R/${model_name}" -P ../checkpoints
 }
 
 # Pick a compose command and store it in $compose_cmd.

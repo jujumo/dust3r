@@ -23,7 +23,7 @@ training on an HPC Slurm cluster there is also an Apptainer-based path
 | `files/cuda.Dockerfile`     | CUDA image (built on `nvcr.io/nvidia/pytorch:24.01-py3`). Compiles the RoPE CUDA extension at build time.
 | `files/cpu.Dockerfile`      | CPU image (built on `python:3.11-slim`).
 | `files/demo-entrypoint.sh`  | Container entrypoint for `demo.sh`: downloads the checkpoint into the bind-mounted dir if missing, then launches `demo.py`.
-| `files/checkpoints/`        | Host-side checkpoint cache. Bind-mounted at `/dust3r/checkpoints` so weights persist between container runs. Gitignored.
+| `../checkpoints/` (repo root) | Host-side checkpoint cache, shared by `demo.sh` / `shell.sh` / `train.sh` / `tensorboard.sh` AND the Slurm trainer. Bind-mounted at `/dust3r/checkpoints` so weights persist between container runs. Gitignored.
 |===
 
 == Two ways to run
@@ -72,7 +72,7 @@ bash train.sh --engine=docker
 Uses `compose run --rm` with the host repo bind-mounted, like `shell.sh`.
 On the **first** run it auto-fetches the CO3D single-sequence subset
 (download + preprocess) and the CroCo v2 checkpoint; both persist on the
-host (`data/` and `docker/files/checkpoints/`), so subsequent runs skip the
+host (`data/` and `checkpoints/`), so subsequent runs skip the
 download and go straight to training. Edit `files/train_entrypoint.sh` on
 the host to change the training config (it is bind-mounted, no rebuild
 needed).
@@ -139,17 +139,28 @@ regardless of `GPUS`. For real multi-GPU training switch that line to
 `torchrun --nproc_per_node=$GPUS train.py …` (see the repo-root README
 "Our Hyperparameters").
 
-== Why `docker/files/checkpoints/` is mounted separately
+== The shared `checkpoints/` directory
 
-The `compose` files declare an explicit volume `./files/checkpoints:/dust3r/checkpoints`.
-This is required by `demo.sh`, which does NOT bind-mount the host repo
-(the image has the code baked in via `COPY`), so without this volume the
-multi-GB downloaded `.pth` would be lost on every `compose down`.
+The `compose` files declare an explicit volume `../checkpoints:/dust3r/checkpoints`,
+pointing at the **repo-root** `checkpoints/` directory. This is required by
+`demo.sh`, which does NOT bind-mount the host repo (the image has the code
+baked in via `COPY`), so without this volume the multi-GB downloaded `.pth`
+would be lost on every `compose down`.
 
-With `shell.sh` the entire host repo is bind-mounted, so this volume is
-technically redundant — but it still wins the overlay order and ensures
-`/dust3r/checkpoints` always points at the same persistent host directory,
-regardless of whether you came in via `demo.sh` or `shell.sh`.
+Pointing it at the repo-root `checkpoints/` (rather than a separate dir under
+`docker/`) keeps a single source of truth: the local compose tools (`demo.sh`,
+`shell.sh`, `train.sh`, `tensorboard.sh`) and the Slurm trainer
+(`slurm_train.sh`, which bind-mounts the whole repo at `/dust3r`) all read and
+write the **same** directory. TensorBoard therefore sees cluster runs too, and
+there is no split-brain between two `checkpoints/` trees.
+
+NOTE: with `shell.sh` / `train.sh` the whole repo is already bind-mounted at
+`/dust3r`, so this explicit volume is technically redundant for them — but it is
+the more specific mount, so it wins the overlay order and guarantees
+`/dust3r/checkpoints` resolves to the same host directory no matter which entry
+point you used. (This is exactly the overlay precedence that previously made
+`tensorboard.sh` read the old `docker/files/checkpoints/` instead of the repo
+root — now both resolve to the same place.)
 
 == Caveats
 
