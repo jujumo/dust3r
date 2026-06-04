@@ -77,7 +77,7 @@ mkdir -p "$LOGDIR"
 account_opt=()
 [ -n "$ACCOUNT" ] && account_opt=(--account="$ACCOUNT")
 
-# srun apptainer exec --nv: --nv injects the host NVIDIA driver/libs and honours
+# apptainer exec --nv: --nv injects the host NVIDIA driver/libs and honours
 # the CUDA_VISIBLE_DEVICES that Slurm assigns this job, so the container only
 # sees the allocated GPU(s). The two binds overlay the live host repo over the
 # image's baked-in /dust3r, then re-mask curope with the compiled-.so cache.
@@ -94,7 +94,7 @@ exec sbatch \
     --mem="$MEM" \
     --time="$TIME" \
     --output="$LOGDIR/%x-%j.out" \
-    --wrap="srun apptainer exec --nv \
+    --wrap="apptainer exec --nv \
         --bind '$REPO_ROOT':/dust3r \
         --bind '$CUROPE_CACHE':/dust3r/croco/models/curope \
         '$SIF' bash /dust3r/docker/files/train_entrypoint.sh"
