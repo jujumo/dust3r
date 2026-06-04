@@ -148,14 +148,14 @@ To run DUSt3R using Docker, including with NVIDIA CUDA support, follow these ins
 
 ```bash
 cd docker
-bash demo.sh --with-cuda --model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+bash demo.sh --model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt"
 ```
 
-Or if you want to run the demo without CUDA support, run the following command:
+Or if you want to run the demo without CUDA support, add the `--cpu` flag:
 
 ```bash 
 cd docker
-bash demo.sh --model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+bash demo.sh --cpu --model_name="DUSt3R_ViTLarge_BaseDecoder_512_dpt"
 ```
 
 By default, `demo.py` is lanched with the option `--local_network`.  

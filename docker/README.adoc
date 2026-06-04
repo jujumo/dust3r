@@ -32,8 +32,8 @@ training on an HPC Slurm cluster there is also an Apptainer-based path
 
 [source,bash]
 ----
-bash demo.sh --with-cuda --model_name=DUSt3R_ViTLarge_BaseDecoder_512_dpt
-# drop --with-cuda for the CPU image
+bash demo.sh --model_name=DUSt3R_ViTLarge_BaseDecoder_512_dpt
+# CUDA is the default; pass --cpu for the CPU image
 # --engine=docker|podman forces a specific engine
 ----
 

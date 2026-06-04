@@ -101,7 +101,7 @@ if [ -z "$image" ]; then
         | grep -m1 'dust3r-demo' || true)
     if [ -z "$image" ]; then
         echo "Could not find a *dust3r-demo* image in $engine's store."
-        echo "Build it first (cd docker && bash demo.sh --with-cuda), or pass --image=<ref>."
+        echo "Build it first (cd docker && bash demo.sh), or pass --image=<ref>."
         exit 1
     fi
 fi

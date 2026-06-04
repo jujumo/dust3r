@@ -3,8 +3,11 @@
 # Build and launch the DUSt3R Gradio demo via docker-compose / podman-compose.
 #
 # Usage:
-#   bash demo.sh [--with-cuda] [--model_name=<NAME>] [--engine=docker|podman]
-#     --with-cuda           use the CUDA compose file (requires NVIDIA toolkit)
+#   bash demo.sh [--cpu] [--with-cuda] [--model_name=<NAME>] [--engine=docker|podman]
+#     --cpu                 use the CPU compose file (default is CUDA, which
+#                           requires the NVIDIA container toolkit)
+#     --with-cuda           use the CUDA compose file; this is now the default,
+#                           the flag is accepted for backward compatibility
 #     --model_name=<NAME>   checkpoint basename (without .pth), default below
 #     --engine=<name>       force docker or podman (default: auto-detect, prefer podman)
 #
@@ -66,20 +69,24 @@ detect_compose_cmd() {
 # (see "${MODEL:-...}" interpolation in docker-compose-*.yml).
 run_docker() {
     export MODEL=${model_name}
-    if [ "$with_cuda" -eq 1 ]; then
-        $compose_cmd -f docker-compose-cuda.yml up --build
-    else
+    if [ "$cpu" -eq 1 ]; then
         $compose_cmd -f docker-compose-cpu.yml up --build
+    else
+        $compose_cmd -f docker-compose-cuda.yml up --build
     fi
 }
 
 # Parse CLI flags.
-with_cuda=0
+cpu=0
 forced_engine=""
 for arg in "$@"; do
     case $arg in
+        --cpu)
+            cpu=1
+            ;;
         --with-cuda)
-            with_cuda=1
+            # CUDA is the default now; accepted for backward compatibility.
+            cpu=0
             ;;
         --model_name=*)
             # Strip the "--model_name=" prefix and re-append .pth.
