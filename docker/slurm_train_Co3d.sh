@@ -3,19 +3,19 @@
 # Run a DUSt3R training session on the Slurm cluster, inside the Apptainer
 # image built from the container by docker/to_apptainer.sh.
 #
-# This is the cluster counterpart of docker/train.sh (which runs locally via
+# This is the cluster counterpart of docker/train_Co3d.sh (which runs locally via
 # docker/podman compose). BOTH run the exact same training command — it lives
-# in docker/files/train_entrypoint.sh, bind-mounted into the container, so the
+# in docker/files/train_Co3d_entrypoint.sh, bind-mounted into the container, so the
 # config (datasets, model, hyperparameters) stays in one place and the local
 # and cluster trainers can't drift apart. Edit that file to change the run.
 #
-# Local (debug, no scheduler):   bash docker/train.sh
-# Cluster (this script):         bash docker/slurm_train.sh
+# Local (debug, no scheduler):   bash docker/train_Co3d.sh
+# Cluster (this script):         bash docker/slurm_train_Co3d.sh
 #
 # Usage:
-#   bash slurm_train.sh
+#   bash slurm_train_Co3d.sh
 #   # override any resource via env var, e.g.:
-#   PARTITION=gpu GPUS=2 TIME=4:00:00 bash slurm_train.sh
+#   PARTITION=gpu GPUS=2 TIME=4:00:00 bash slurm_train_Co3d.sh
 #
 #   SIF        path to the .sif            (default: ./files/dust3r.sif)
 #   PARTITION  Slurm partition            (default: debug — chaos V100 nodes, 1-day cap)
@@ -31,7 +31,7 @@
 # Monitor training curves with TensorBoard (docker/tensorboard.sh) pointed at
 # the same checkpoints/ output dir (it is on the bind-mounted host repo).
 #
-# NOTE on multi-GPU: train_entrypoint.sh runs a single `python train.py`, so it
+# NOTE on multi-GPU: train_Co3d_entrypoint.sh runs a single `python train.py`, so it
 # uses ONE GPU regardless of GPUS. For real multi-GPU training switch that line
 # to `torchrun --nproc_per_node=$GPUS train.py ...` (see README "Hyperparameters").
 
@@ -60,7 +60,7 @@ fi
 
 # Re-expose the image's compiled curope (RoPE CUDA .so) over the live repo
 # bind-mount, mirroring what compose does with its anonymous volume in
-# train.sh/shell.sh. The host repo's croco/models/curope (a submodule) ships
+# train_Co3d.sh/shell.sh. The host repo's croco/models/curope (a submodule) ships
 # only sources, so without this the bind-mount would shadow the .so and we'd
 # silently drop to the slow PyTorch RoPE. One-time, idempotent extraction.
 CUROPE_CACHE="$SCRIPT_DIR/files/curope"
@@ -77,13 +77,13 @@ mkdir -p "$LOGDIR"
 account_opt=()
 [ -n "$ACCOUNT" ] && account_opt=(--account="$ACCOUNT")
 
-# Submit a real script file (files/train_job.sbatch) rather than `sbatch
+# Submit a real script file (files/train_Co3d_job.sbatch) rather than `sbatch
 # --wrap=...`. A --wrap job has no on-disk script, so `scontrol show job`
 # reports `Command=(null)` and TUIs like `slurmer` that read that path to show
 # the batch script fail with "Failed to read script from path: (null)". A real
 # file gives a concrete, persistent Command= path. The apptainer binds/image
-# are resolved here and handed to the job via --export; see train_job.sbatch.
-JOB_SCRIPT="$SCRIPT_DIR/files/train_job.sbatch"
+# are resolved here and handed to the job via --export; see train_Co3d_job.sbatch.
+JOB_SCRIPT="$SCRIPT_DIR/files/train_Co3d_job.sbatch"
 echo "Submitting: partition=$PARTITION account=${ACCOUNT:-<default>} gpus=$GPUS time=$TIME"
 echo "Image     : $SIF"
 echo "Logs      : $LOGDIR/$JOBNAME-<jobid>.out"

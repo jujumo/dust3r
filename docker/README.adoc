@@ -13,18 +13,18 @@ training on an HPC Slurm cluster there is also an Apptainer-based path
 |===
 | `demo.sh`                   | Build (if needed) and launch the Gradio demo via `compose up`.
 | `shell.sh`                  | Open an interactive bash shell inside the demo image (for training / manual work).
-| `train.sh`                  | Run the CO3D-subset training smoke-test locally in its own container via `compose run`.
+| `train_Co3d.sh`                  | Run the CO3D-subset training smoke-test locally in its own container via `compose run`.
 | `to_apptainer.sh`           | Repack the already-built container image into an Apptainer `.sif` for the cluster (no rebuild).
-| `slurm_train.sh`            | Submit the training to Slurm via `sbatch` + `apptainer exec --nv` (cluster counterpart of `train.sh`).
-| `files/train_entrypoint.sh` | Shared entrypoint for `train.sh` AND `slurm_train.sh`: bootstraps prerequisites, then runs `train.py`.
-| `files/train_job.sbatch`    | Batch script `slurm_train.sh` submits to `sbatch` (a real file rather than `--wrap`, so `scontrol show job` reports a concrete `Command=` path and TUIs like `slurmer` can display it). Runs `apptainer exec … train_entrypoint.sh`.
+| `slurm_train_Co3d.sh`            | Submit the training to Slurm via `sbatch` + `apptainer exec --nv` (cluster counterpart of `train_Co3d.sh`).
+| `files/train_Co3d_entrypoint.sh` | Shared entrypoint for `train_Co3d.sh` AND `slurm_train_Co3d.sh`: bootstraps prerequisites, then runs `train.py`.
+| `files/train_Co3d_job.sbatch`    | Batch script `slurm_train_Co3d.sh` submits to `sbatch` (a real file rather than `--wrap`, so `scontrol show job` reports a concrete `Command=` path and TUIs like `slurmer` can display it). Runs `apptainer exec … train_Co3d_entrypoint.sh`.
 | `files/prepare_co3d.sh`     | Idempotent one-time bootstrap: downloads + preprocesses the CO3D subset and fetches the CroCo v2 checkpoint (both persist on the host).
 | `docker-compose-cuda.yml`   | CUDA service definition. Reserves all host GPUs.
 | `docker-compose-cpu.yml`    | CPU-only service definition. Same image conventions, no GPU.
 | `files/cuda.Dockerfile`     | CUDA image (built on `nvcr.io/nvidia/pytorch:24.01-py3`). Compiles the RoPE CUDA extension at build time.
 | `files/cpu.Dockerfile`      | CPU image (built on `python:3.11-slim`).
 | `files/demo-entrypoint.sh`  | Container entrypoint for `demo.sh`: downloads the checkpoint into the bind-mounted dir if missing, then launches `demo.py`.
-| `../checkpoints/` (repo root) | Host-side checkpoint cache, shared by `demo.sh` / `shell.sh` / `train.sh` / `tensorboard.sh` AND the Slurm trainer. Bind-mounted at `/dust3r/checkpoints` so weights persist between container runs. Gitignored.
+| `../checkpoints/` (repo root) | Host-side checkpoint cache, shared by `demo.sh` / `shell.sh` / `train_Co3d.sh` / `tensorboard.sh` AND the Slurm trainer. Bind-mounted at `/dust3r/checkpoints` so weights persist between container runs. Gitignored.
 |===
 
 == Two ways to run
@@ -61,32 +61,32 @@ Uses `compose run --rm`. Adds:
 The shell starts in `/dust3r` and can be used for training (see
 `shell.sh`'s own header comments for a CO3D-subset training quickstart).
 
-=== `train.sh` — CO3D-subset training smoke-test
+=== `train_Co3d.sh` — CO3D-subset training smoke-test
 
 [source,bash]
 ----
-bash train.sh              # CUDA
-bash train.sh --cpu        # CPU image
-bash train.sh --engine=docker
+bash train_Co3d.sh              # CUDA
+bash train_Co3d.sh --cpu        # CPU image
+bash train_Co3d.sh --engine=docker
 ----
 
 Uses `compose run --rm` with the host repo bind-mounted, like `shell.sh`.
 On the **first** run it auto-fetches the CO3D single-sequence subset
 (download + preprocess) and the CroCo v2 checkpoint; both persist on the
 host (`data/` and `checkpoints/`), so subsequent runs skip the
-download and go straight to training. Edit `files/train_entrypoint.sh` on
+download and go straight to training. Edit `files/train_Co3d_entrypoint.sh` on
 the host to change the training config (it is bind-mounted, no rebuild
 needed).
 
 == Running on a Slurm cluster (Apptainer)
 
-`train.sh` runs locally via compose, which does not fit a Slurm cluster:
+`train_Co3d.sh` runs locally via compose, which does not fit a Slurm cluster:
 compose reserves GPUs with `count: all` (fighting the scheduler) and compute
 nodes usually have no container daemon. The cluster path uses **Apptainer**
 instead — it is daemonless, runs as your user, and `apptainer exec --nv`
 honours the `CUDA_VISIBLE_DEVICES` that Slurm assigns to the job.
 
-Both trainers run the **same** `files/train_entrypoint.sh`, so the training
+Both trainers run the **same** `files/train_Co3d_entrypoint.sh`, so the training
 config (datasets, model, hyperparameters) lives in one place and the local and
 cluster runs cannot drift apart.
 
@@ -110,9 +110,9 @@ local image store directly; the tarball is removed on exit.)
 
 [source,bash]
 ----
-bash slurm_train.sh
+bash slurm_train_Co3d.sh
 # override resources via env vars, e.g.:
-PARTITION=gpu GPUS=2 TIME=4:00:00 bash slurm_train.sh
+PARTITION=gpu GPUS=2 TIME=4:00:00 bash slurm_train_Co3d.sh
 ----
 
 Defaults: partition `debug` (chaos V100 nodes, 1-day cap), account `ffs-3d`,
@@ -126,7 +126,7 @@ let Slurm pick the default account. Logs land in
 tail -f ../slurm-logs/dust3r-train-<jobid>.out
 ----
 
-Like `train.sh` / `shell.sh`, the live host repo is bind-mounted over `/dust3r`
+Like `train_Co3d.sh` / `shell.sh`, the live host repo is bind-mounted over `/dust3r`
 (code edits are picked up without rebuilding the `.sif`). The compiled RoPE
 CUDA extension is preserved the same way compose preserves it: on first run the
 script extracts `croco/models/curope` out of the `.sif` into `files/curope/`
@@ -135,7 +135,7 @@ the source-only host submodule (otherwise you would silently fall back to the
 slow PyTorch RoPE). Monitor curves with `tensorboard.sh` pointed at the same
 `checkpoints/` output dir (it is on the bind-mounted host repo).
 
-NOTE: `train_entrypoint.sh` runs a single `python train.py`, so it uses one GPU
+NOTE: `train_Co3d_entrypoint.sh` runs a single `python train.py`, so it uses one GPU
 regardless of `GPUS`. For real multi-GPU training switch that line to
 `torchrun --nproc_per_node=$GPUS train.py …` (see the repo-root README
 "Our Hyperparameters").
@@ -150,12 +150,12 @@ would be lost on every `compose down`.
 
 Pointing it at the repo-root `checkpoints/` (rather than a separate dir under
 `docker/`) keeps a single source of truth: the local compose tools (`demo.sh`,
-`shell.sh`, `train.sh`, `tensorboard.sh`) and the Slurm trainer
-(`slurm_train.sh`, which bind-mounts the whole repo at `/dust3r`) all read and
+`shell.sh`, `train_Co3d.sh`, `tensorboard.sh`) and the Slurm trainer
+(`slurm_train_Co3d.sh`, which bind-mounts the whole repo at `/dust3r`) all read and
 write the **same** directory. TensorBoard therefore sees cluster runs too, and
 there is no split-brain between two `checkpoints/` trees.
 
-NOTE: with `shell.sh` / `train.sh` the whole repo is already bind-mounted at
+NOTE: with `shell.sh` / `train_Co3d.sh` the whole repo is already bind-mounted at
 `/dust3r`, so this explicit volume is technically redundant for them — but it is
 the more specific mount, so it wins the overlay order and guarantees
 `/dust3r/checkpoints` resolves to the same host directory no matter which entry

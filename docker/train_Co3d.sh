@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Run a DUSt3R training session in its own container. The actual training
-# command lives in docker/files/train_entrypoint.sh — edit that file on the
+# command lives in docker/files/train_Co3d_entrypoint.sh — edit that file on the
 # host to change the training config (bind-mounted, so changes are live
 # without rebuilding the image).
 #
@@ -9,7 +9,7 @@
 # (http://localhost:6006 on the host, or tunnel via ssh).
 #
 # Usage:
-#   bash train.sh [--cpu] [--engine=docker|podman]
+#   bash train_Co3d.sh [--cpu] [--engine=docker|podman]
 #     --cpu               use the CPU image (default: CUDA, requires NVIDIA toolkit)
 #     --engine=<name>     force docker or podman (default: auto-detect, prefer podman)
 #
@@ -77,5 +77,5 @@ cd "$SCRIPT_DIR"
 exec $compose_cmd -f "$compose_file" run --rm \
     -v "$REPO_ROOT:/dust3r" \
     -v "/dust3r/croco/models/curope" \
-    --entrypoint /dust3r/docker/files/train_entrypoint.sh \
+    --entrypoint /dust3r/docker/files/train_Co3d_entrypoint.sh \
     dust3r-demo

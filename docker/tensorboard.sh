@@ -18,7 +18,7 @@
 # tunnel through SSH from your PC:
 #     ssh -fNL 6006:localhost:6006 <server>
 #
-# Run this alongside shell.sh / train.sh — TensorBoard picks up new event
+# Run this alongside shell.sh / train_Co3d.sh — TensorBoard picks up new event
 # files automatically (--reload_interval 5).
 
 set -eu

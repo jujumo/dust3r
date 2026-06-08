@@ -33,7 +33,7 @@
 # filesystem (NOT /tmp), e.g.
 #   APPTAINER_TMPDIR=/home/$USER/dust3r/apptainer-tmp bash to_apptainer.sh
 #
-# Once built, launch the training under Slurm with docker/slurm_train.sh.
+# Once built, launch the training under Slurm with docker/slurm_train_Co3d.sh.
 
 set -eu
 
@@ -149,4 +149,4 @@ apptainer build --force "$output" "$source_uri"
 
 echo
 echo "Built $output"
-echo "Run the training under Slurm with: bash $SCRIPT_DIR/slurm_train.sh"
+echo "Run the training under Slurm with: bash $SCRIPT_DIR/slurm_train_Co3d.sh"

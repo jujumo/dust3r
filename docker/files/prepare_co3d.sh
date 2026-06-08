@@ -1,6 +1,6 @@
 #!/bin/bash
 # One-time bootstrap of the prerequisites for the CO3D-subset training
-# smoke-test, run from inside the training container by train_entrypoint.sh.
+# smoke-test, run from inside the training container by train_Co3d_entrypoint.sh.
 #
 # Both artifacts live under the bind-mounted host repo (/dust3r) so they
 # persist across container runs and are only fetched once:
