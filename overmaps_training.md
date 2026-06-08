@@ -1,39 +1,47 @@
-# Understanding the training example (`train_Co3d_entrypoint.sh`)
+# Training on OverMaps (`train_overmaps_entrypoint.sh`)
 
-This document explains the rationale and behavior of the default training
-example shipped in `docker/files/train_Co3d_entrypoint.sh`. It is the baseline we
-will adapt to train on a custom dataset — so each section flags what is
-**example-specific** (will change for a new dataset) vs. **structural** (stays).
+This document is the OverMaps-specific training guide. The launcher scripts are:
 
-## 1. What the script is and where it runs
+| Local (compose) | Cluster (Slurm / Apptainer) |
+|---|---|
+| `docker/train_overmaps.sh` | `docker/slurm_train_overmaps.sh` |
 
-`docker/files/train_Co3d_entrypoint.sh` is the command executed **inside the training
-container** (launched by `docker/train_Co3d.sh` / the compose files). The host repo
-is bind-mounted at `/dust3r`, so editing this file on the host changes the next
-run with no image rebuild.
+Both run `docker/files/train_overmaps_entrypoint.sh` inside the container — edit
+that file on the host to change the training config (bind-mounted, no image
+rebuild needed).
 
-The default config is the README "Demo" smoke-test: a tiny 10-epoch run on a
-single-sequence CO3D subset, just to prove the training loop works end-to-end.
+> **Current state:** `train_overmaps_entrypoint.sh` is a copy of the Co3d
+> smoke-test. The sections below describe what each part does and flag what
+> still needs to be replaced for OverMaps (marked **TODO**).
+
+## 1. What the entrypoint does
+
+`docker/files/train_overmaps_entrypoint.sh` is executed **inside the training
+container** (launched by `docker/train_overmaps.sh` or `slurm_train_overmaps.sh`).
+The host repo is bind-mounted at `/dust3r`, so edits take effect on the next run
+without rebuilding the image.
+
+Structure of the script:
 
 ```bash
-set -eu                              # abort on error / unset var
-cd /dust3r                           # repo root (bind-mounted host repo)
-/dust3r/docker/files/prepare_co3d.sh # one-time bootstrap of prerequisites
-exec python train.py ...             # replace shell with the trainer (PID 1)
+set -eu                               # abort on error / unset var
+cd /dust3r                            # repo root (bind-mounted host repo)
+/dust3r/docker/files/prepare_co3d.sh  # one-time bootstrap of prerequisites  ← TODO
+exec python train.py ...              # replace shell with the trainer (PID 1)
 ```
 
-- `prepare_co3d.sh` is idempotent: downloads + preprocesses the CO3D
-  single-sequence subset into `data/co3d_subset_processed/` and fetches the
-  CroCo v2 checkpoint into `checkpoints/`. Both live under the bind-mounted
-  repo, so they persist on the host and are skipped on later runs.
+- The bootstrap script is idempotent: it downloads/preprocesses data and fetches
+  the CroCo v2 checkpoint into `checkpoints/`. Both persist on the host and are
+  skipped on later runs.
 - `exec` replaces the shell with Python so signals (Ctrl-C, docker/SLURM stop)
   reach the trainer directly.
 - `train.py` is a 3-line shim calling `get_args_parser()` + `train(args)` from
   `dust3r/training.py`.
 
-> **Adapt for custom dataset:** `prepare_co3d.sh` is entirely CO3D-specific.
-> A custom dataset needs its own bootstrap (download + preprocess into the
-> layout the dataset class expects), or the prerequisites prepared manually.
+> **TODO:** replace `prepare_co3d.sh` with an OverMaps-specific bootstrap
+> (or prepare the data manually and remove the call). The bootstrap must place
+> data in the layout the `OverMaps` dataset class expects and ensure the
+> `--pretrained` checkpoint is present.
 
 ## 2. The key mechanism: eval()'d expression strings
 
@@ -43,12 +51,14 @@ exec python train.py ...             # replace shell with the trainer (PID 1)
 `training.py` does `from dust3r.losses import *`, imports the model, the dataset
 classes from `dust3r/datasets/__init__.py`, etc.
 
-> **Adapt for custom dataset:** a custom dataset class must be importable from
+> **TODO:** the `OverMaps` dataset class must be importable from
 > `dust3r/datasets/__init__.py` for its name to be usable in `--train_dataset`.
 
 ## 3. Flag-by-flag
 
 ### Datasets — `"N @ DatasetCls(args)"`
+
+Current placeholder (Co3d, to be replaced):
 
 ```
 --train_dataset "1000 @ Co3d(split='train', ROOT='data/co3d_subset_processed',
@@ -64,9 +74,9 @@ classes from `dust3r/datasets/__init__.py`, etc.
   augmentations**. Eval uses none and a fixed `seed=777` for reproducibility.
 - `resolution=224` matches the model `img_size`.
 
-> **Adapt for custom dataset:** this is the line that changes the most — swap
-> `Co3d(...)` for the custom dataset class, point `ROOT` at the preprocessed
-> data, set the sample count, and decide which augmentations apply.
+> **TODO:** replace `Co3d(...)` with `OverMaps(...)`, point `ROOT` at the
+> preprocessed data directory, set appropriate sample counts, and decide which
+> augmentations apply.
 
 ### Model — the asymmetric Siamese ViT
 
@@ -146,10 +156,9 @@ This exact ViT-Large-encoder + Base-decoder + RoPE100 combination is what the
 published `CroCo_V2_ViTLarge_BaseDecoder.pth` and the 224 DUSt3R checkpoint were
 trained with — hence it pairs with the `--pretrained` line below.
 
-> **Adapt for custom dataset:** keep the architecture identical so you can
-> warm-start from a published checkpoint — changing any `enc_*`/`dec_*` dim,
-> `pos_embed`, or `patch_size` breaks weight loading and forces training from
-> scratch. The levers you *may* legitimately touch for a custom run:
+> Keep the architecture identical to warm-start from a published checkpoint —
+> changing any `enc_*`/`dec_*` dim, `pos_embed`, or `patch_size` breaks weight
+> loading and forces training from scratch. Legitimate levers for OverMaps:
 > `head_type`/`img_size` (must move together with `resolution` and the matching
 > checkpoint — e.g. `dpt` + `512` for the high-res model) and `freeze='encoder'`
 > to fine-tune cheaply on limited data.
@@ -167,8 +176,7 @@ trained with — hence it pairs with the `--pretrained` line below.
 - Eval: `Regr3D_ScaleShiftInv` — scale-and-shift-invariant 3D regression, the
   standard DUSt3R eval metric.
 
-> **Adapt for custom dataset:** typically unchanged — these are the standard
-> DUSt3R train/eval criteria and are dataset-agnostic.
+> These are dataset-agnostic — no changes needed for OverMaps.
 
 ### Warm start
 
@@ -176,13 +184,13 @@ trained with — hence it pairs with the `--pretrained` line below.
 --pretrained "checkpoints/CroCo_V2_ViTLarge_BaseDecoder.pth"
 ```
 
-Initializes from the CroCo v2 backbone (fetched by `prepare_co3d.sh`). In the
-full 3-stage curriculum, later stages point this at the previous stage's
-`checkpoint-best.pth` instead.
+Initializes from the CroCo v2 backbone (currently fetched by the placeholder
+`prepare_co3d.sh`). In the full 3-stage curriculum, later stages point this at
+the previous stage's `checkpoint-best.pth` instead.
 
-> **Adapt for custom dataset:** likely point this at a DUSt3R checkpoint
-> (e.g. the published 224 model) to fine-tune, rather than the raw CroCo
-> backbone — depends on whether you fine-tune or train from the backbone.
+> **TODO:** decide whether to fine-tune from the published DUSt3R 224 checkpoint
+> or warm-start from the raw CroCo v2 backbone, and update this path accordingly.
+> The bootstrap script must ensure the chosen checkpoint is present.
 
 ### Optimization / schedule
 
@@ -198,8 +206,8 @@ full 3-stage curriculum, later stages point this at the previous stage's
 - `num_workers 0` loads data in the main process — simple/safe in a container
   (avoids `/dev/shm` issues), at the cost of speed.
 
-> **Adapt for custom dataset:** tune epochs / LR / batch size to the size of the
-> new dataset and the GPU budget. Mostly knobs, not structural.
+> **TODO:** tune epochs / LR / batch size once the size of OverMaps and the
+> GPU budget are known. Mostly knobs, not structural.
 
 ### Checkpointing / eval cadence + output
 
@@ -214,26 +222,29 @@ full 3-stage curriculum, later stages point this at the previous stage's
 - Outputs land in `checkpoints/dust3r_demo_224/` under the bind-mounted repo, so
   they survive after the container exits.
 
-> **Adapt for custom dataset:** change `--output_dir` so a new run doesn't
-> collide with the demo's checkpoints.
+> **TODO:** change `--output_dir` to something OverMaps-specific (e.g.
+> `checkpoints/dust3r_overmaps_224`) so it doesn't collide with the Co3d run.
 
-## 4. How this differs from a real run
+## 4. Scale: current placeholder vs. a real OverMaps run
 
-This is the smallest possible config (1000 train pairs, one CO3D sequence,
-linear head, 224 res, 10 epochs). The full DUSt3R recipe is a 3-stage curriculum
+The current entrypoint is a minimal smoke-test config (1000 train pairs, 10
+epochs, linear head, 224 res). A real OverMaps run will need more pairs and
+more epochs; the full DUSt3R recipe is a 3-stage curriculum
 (224 linear → 512 linear → 512 dpt), each stage warm-started from the previous
 stage's `checkpoint-best.pth`, using `--model "...(patch_embed_cls='ManyAR_PatchEmbed')"`
 for mixed aspect ratios — see repo-root README "Our Hyperparameters".
 
-## 5. Summary: what changes for a custom dataset
+## 5. OverMaps TODO checklist
 
-| Part | Changes? |
-|------|----------|
-| `prepare_co3d.sh` bootstrap | **Yes** — needs a dataset-specific equivalent |
-| Custom dataset class (importable from `dust3r/datasets/__init__.py`) | **Yes — new code** |
-| `--train_dataset` / `--test_dataset` strings | **Yes** |
-| `--output_dir` | **Yes** |
-| `--pretrained` | **Likely** (fine-tune vs. from backbone) |
-| `--lr` / `--epochs` / `--batch_size` | **Tune** |
-| `--model` architecture | Usually no |
-| `--train_criterion` / `--test_criterion` | Usually no |
+| Part | Status |
+|------|--------|
+| `OverMaps` dataset class in `dust3r/datasets/` | **TODO — new code** |
+| Export from `dust3r/datasets/__init__.py` | **TODO** |
+| Bootstrap script (`prepare_overmaps.sh` or manual data prep) | **TODO** |
+| Replace `prepare_co3d.sh` call in entrypoint | **TODO** |
+| `--train_dataset` / `--test_dataset` strings → `OverMaps(...)` | **TODO** |
+| `--output_dir` → `checkpoints/dust3r_overmaps_224` | **TODO** |
+| `--pretrained` → DUSt3R 224 checkpoint (or CroCo backbone) | **TODO** |
+| `--lr` / `--epochs` / `--batch_size` tuning | tune once data size is known |
+| `--model` architecture | keep as-is |
+| `--train_criterion` / `--test_criterion` | keep as-is |
