@@ -5,9 +5,14 @@
 # docker-compose-{cuda,cpu}.yml).
 #
 # Usage:
-#   bash shell.sh [--cpu] [--engine=docker|podman]
+#   bash shell.sh [--cpu] [--engine=docker|podman] [-- CMD [ARG...]]
 #     --cpu               use the CPU image (default: CUDA, requires NVIDIA toolkit)
 #     --engine=<name>     force docker or podman (default: auto-detect, prefer podman)
+#     -- CMD [ARG...]     run CMD once inside the container (non-interactively) and
+#                         exit, instead of opening an interactive shell. Everything
+#                         after -- is passed through verbatim, e.g.:
+#                           bash shell.sh --cpu -- python3 demo.py --help
+#                           bash shell.sh -- bash -c 'cd /dust3r && torchrun ...'
 #
 # The host repo is bind-mounted over /dust3r, so:
 #   - code edits are live (no rebuild needed)
@@ -46,13 +51,14 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
 compose_file="docker-compose-cuda.yml"
 forced_engine=""
-for arg in "$@"; do
-    case $arg in
+run_cmd=()        # if non-empty, run this once inside the container instead of an interactive shell
+while [ $# -gt 0 ]; do
+    case $1 in
         --cpu)
             compose_file="docker-compose-cpu.yml"
             ;;
         --engine=*)
-            forced_engine="${arg#*=}"
+            forced_engine="${1#*=}"
             case $forced_engine in
                 docker|podman) ;;
                 *)
@@ -61,11 +67,18 @@ for arg in "$@"; do
                     ;;
             esac
             ;;
+        --)
+            shift
+            run_cmd=("$@")    # everything after -- is the command to run
+            break
+            ;;
         *)
-            echo "Unknown parameter passed: $arg"
+            echo "Unknown parameter passed: $1"
+            echo "(to run a command instead of an interactive shell, put it after --)"
             exit 1
             ;;
     esac
+    shift
 done
 
 # Pick a compose command. By default prefer podman over docker; --engine=<name>
@@ -106,11 +119,24 @@ cd "$SCRIPT_DIR"
 # image's baked-in /dust3r; the second is an anonymous volume that re-masks
 # croco/models/curope/ with the image's contents, so the .so compiled at
 # build time (which the host repo doesn't have) is visible at runtime.
-# --service-ports publishes the compose file's "ports:" (gradio's 37860) so
-# that a demo started by hand inside the shell is reachable from the host.
-exec $compose_cmd -f "$compose_file" run --rm \
-    --service-ports \
-    -v "$REPO_ROOT:/dust3r" \
-    -v "/dust3r/croco/models/curope" \
-    --entrypoint bash \
-    dust3r-demo
+run_opts=(--rm
+    -v "$REPO_ROOT:/dust3r"
+    -v "/dust3r/croco/models/curope"
+    --entrypoint bash)
+
+cmd_suffix=()
+if [ ${#run_cmd[@]} -gt 0 ]; then
+    # Non-interactive: run the user's command. With "--entrypoint bash", the args
+    # after the service name are bash's argv, so `-c '"$@"' shell CMD ARG...`
+    # execs CMD with its arguments intact (no re-quoting / word-splitting).
+    cmd_suffix=(-c '"$@"' shell "${run_cmd[@]}")
+else
+    # Interactive shell: publish the compose file's "ports:" (gradio's 37860) so a
+    # demo started by hand inside the shell is reachable from the host. (Skipped in
+    # command mode, where publishing a port is usually unwanted and can clash.)
+    run_opts+=(--service-ports)
+fi
+
+exec $compose_cmd -f "$compose_file" run \
+    "${run_opts[@]}" \
+    dust3r-demo ${cmd_suffix[@]+"${cmd_suffix[@]}"}
