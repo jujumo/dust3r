@@ -124,19 +124,35 @@ run_opts=(--rm
     -v "/dust3r/croco/models/curope"
     --entrypoint bash)
 
-cmd_suffix=()
 if [ ${#run_cmd[@]} -gt 0 ]; then
-    # Non-interactive: run the user's command. With "--entrypoint bash", the args
-    # after the service name are bash's argv, so `-c '"$@"' shell CMD ARG...`
-    # execs CMD with its arguments intact (no re-quoting / word-splitting).
-    cmd_suffix=(-c '"$@"' shell "${run_cmd[@]}")
-else
-    # Interactive shell: publish the compose file's "ports:" (gradio's 37860) so a
-    # demo started by hand inside the shell is reachable from the host. (Skipped in
-    # command mode, where publishing a port is usually unwanted and can clash.)
-    run_opts+=(--service-ports)
+    # Non-interactive: run the user's command once and exit. With "--entrypoint
+    # bash", the args after the service name are bash's argv, so `-c '"$@"' shell
+    # CMD ARG...` execs CMD with its arguments intact (no re-quoting / splitting).
+    #
+    # Two benign messages are filtered from stderr in this mode:
+    #   - "The input device is not a TTY" (appears only when stdin is piped);
+    #   - "rootless netns: kill network process: permission denied" — a podman
+    #     5 / netavark rootless quirk on this NFS workstation: the container is
+    #     still removed, no netns process leaks, and the exit code is 0; podman
+    #     just can't signal the shared netns helper on teardown.
+    # stdout, the command's own stderr, the exit code, and any *other* podman
+    # error all pass through untouched.
+    exec 3>&1
+    set +e
+    $compose_cmd -f "$compose_file" run \
+        "${run_opts[@]}" \
+        dust3r-demo -c '"$@"' shell "${run_cmd[@]}" 2>&1 1>&3 \
+        | grep -vE 'The input device is not a TTY|rootless netns: kill network process: permission denied' >&2
+    rc=${PIPESTATUS[0]}
+    set -e
+    exec 3>&-
+    exit "$rc"
 fi
 
+# Interactive shell: publish the compose file's "ports:" (gradio's 37860) so a
+# demo started by hand inside the shell is reachable from the host. (Skipped in
+# command mode, where publishing a port is usually unwanted and can clash.)
+run_opts+=(--service-ports)
 exec $compose_cmd -f "$compose_file" run \
     "${run_opts[@]}" \
-    dust3r-demo ${cmd_suffix[@]+"${cmd_suffix[@]}"}
+    dust3r-demo
