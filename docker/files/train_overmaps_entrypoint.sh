@@ -3,9 +3,17 @@
 # change the training config — the host repo is bind-mounted into /dust3r, so
 # changes are live without rebuilding the image.
 #
-# This is a 224 linear-head smoke-test on the OverMaps dataset, warm-started
-# from the CroCo v2 backbone. For the full 3-stage curriculum (224 linear ->
-# 512 linear -> 512 dpt), see README "Our Hyperparameters" and overmaps_training.md.
+# This is a 224 linear-head training run on the OverMaps dataset, warm-started
+# from the CroCo v2 backbone, sized after the reference DUSt3R stage-1 recipe
+# (100 epochs, 10 warmup, effective batch 16 = batch_size 4 x accum_iter 4 so
+# it fits a 32 GB V100; raise batch_size / drop accum_iter on a bigger GPU).
+# For the full 3-stage curriculum
+# (224 linear -> 512 linear -> 512 dpt), see README "Our Hyperparameters" and
+# overmaps_training.md.
+#
+# NOTE: --output_dir must be empty/new. train.py auto-resumes from a
+# checkpoint-last.pth found there and then IGNORES --pretrained, so reusing a
+# dir from a previous run silently continues that run instead of warm-starting.
 #
 # Prerequisites: the CroCo v2 checkpoint (fetched on first run) and the
 # preprocessed OverMaps data at data/overmaps_processed/ (generated manually by
@@ -24,14 +32,14 @@ cd /dust3r
 
 /dust3r/docker/files/prepare_overmaps.sh
 
-exec python train.py \
-    --train_dataset "1000 @ OverMaps(split='train', ROOT='data/overmaps_processed', aug_crop=16, resolution=224, transform=ColorJitter)" \
-    --test_dataset  "100 @ OverMaps(split='test', ROOT='data/overmaps_processed', resolution=224, seed=777)" \
+exec python -u train.py \
+    --train_dataset "1680 @ OverMaps(split='train', ROOT='data/overmaps_processed', aug_crop=16, resolution=224, transform=ColorJitter)" \
+    --test_dataset  "80 @ OverMaps(split='test', ROOT='data/overmaps_processed', resolution=224, seed=777)" \
     --model "AsymmetricCroCo3DStereo(pos_embed='RoPE100', img_size=(224, 224), head_type='linear', output_mode='pts3d', depth_mode=('exp', -inf, inf), conf_mode=('exp', 1, inf), enc_embed_dim=1024, enc_depth=24, enc_num_heads=16, dec_embed_dim=768, dec_depth=12, dec_num_heads=12)" \
     --train_criterion "ConfLoss(Regr3D(L21, norm_mode='avg_dis'), alpha=0.2)" \
     --test_criterion  "Regr3D_ScaleShiftInv(L21, gt_scale=True)" \
     --pretrained "checkpoints/CroCo_V2_ViTLarge_BaseDecoder.pth" \
-    --lr 0.0001 --min_lr 1e-06 --warmup_epochs 1 --epochs 10 \
-    --batch_size 4 --accum_iter 1 --num_workers 0 \
-    --save_freq 1 --keep_freq 5 --eval_freq 1 \
-    --output_dir "checkpoints/dust3r_overmaps_224"
+    --lr 0.0001 --min_lr 1e-06 --warmup_epochs 10 --epochs 100 \
+    --batch_size 4 --accum_iter 4 --num_workers 8 \
+    --save_freq 1 --keep_freq 20 --eval_freq 1 \
+    --output_dir "checkpoints/dust3r_overmaps_224_full"
