@@ -7,6 +7,7 @@ from .blendedmvs import BlendedMVS  # noqa
 from .co3d import Co3d  # noqa
 from .habitat import Habitat  # noqa
 from .megadepth import MegaDepth  # noqa
+from .overmaps import OverMaps  # noqa
 from .scannetpp import ScanNetpp  # noqa
 from .staticthings3d import StaticThings3D  # noqa
 from .waymo import Waymo  # noqa
