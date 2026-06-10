@@ -5,9 +5,14 @@
 # docker-compose-{cuda,cpu}.yml).
 #
 # Usage:
-#   bash shell.sh [--cpu] [--engine=docker|podman] [-- CMD [ARG...]]
+#   bash shell.sh [--cpu] [--engine=docker|podman] [--mount=SRC:DST]... [-- CMD [ARG...]]
 #     --cpu               use the CPU image (default: CUDA, requires NVIDIA toolkit)
 #     --engine=<name>     force docker or podman (default: auto-detect, prefer podman)
+#     --mount=SRC:DST     bind-mount an extra host path into the container (repeatable).
+#                         Use for data that lives outside the repo, e.g. cluster scratch:
+#                           bash shell.sh --cpu --mount=/beegfs/scratch/user/me/data:/data \
+#                             -- python3 /dust3r/datasets_preprocess/preprocess_overmaps.py \
+#                                  --overmaps_dir /data/OverMaps-1K --output_dir /data/overmaps_processed
 #     -- CMD [ARG...]     run CMD once inside the container (non-interactively) and
 #                         exit, instead of opening an interactive shell. Everything
 #                         after -- is passed through verbatim, e.g.:
@@ -52,6 +57,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 compose_file="docker-compose-cuda.yml"
 forced_engine=""
 run_cmd=()        # if non-empty, run this once inside the container instead of an interactive shell
+extra_mounts=()   # extra "-v SRC:DST" bind mounts from --mount=
 while [ $# -gt 0 ]; do
     case $1 in
         --cpu)
@@ -66,6 +72,9 @@ while [ $# -gt 0 ]; do
                     exit 1
                     ;;
             esac
+            ;;
+        --mount=*)
+            extra_mounts+=(-v "${1#*=}")
             ;;
         --)
             shift
@@ -123,6 +132,10 @@ run_opts=(--rm
     -v "$REPO_ROOT:/dust3r"
     -v "/dust3r/croco/models/curope"
     --entrypoint bash)
+# extra host paths (e.g. cluster scratch holding the dataset) requested via --mount=
+if [ ${#extra_mounts[@]} -gt 0 ]; then
+    run_opts+=("${extra_mounts[@]}")
+fi
 
 if [ ${#run_cmd[@]} -gt 0 ]; then
     # Non-interactive: run the user's command once and exit. With "--entrypoint
