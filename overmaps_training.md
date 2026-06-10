@@ -10,9 +10,12 @@ Both run `docker/files/train_overmaps_entrypoint.sh` inside the container — ed
 that file on the host to change the training config (bind-mounted, no image
 rebuild needed).
 
-> **Current state:** `train_overmaps_entrypoint.sh` is a copy of the Co3d
-> smoke-test. The sections below describe what each part does and flag what
-> still needs to be replaced for OverMaps (marked **TODO**).
+> **Current state:** `train_overmaps_entrypoint.sh` is a real 224 linear-head
+> run on OverMaps, sized after the reference DUSt3R stage-1 recipe (100 epochs,
+> 10 warmup, effective batch 16). It warm-starts from the CroCo v2 backbone and
+> writes to `checkpoints/dust3r_overmaps_224_full`. The sections below describe
+> what each flag does; the original Co3d-smoke-test TODOs are all resolved
+> (see the checklist in §5).
 
 ## 1. What the entrypoint does
 
@@ -24,24 +27,23 @@ without rebuilding the image.
 Structure of the script:
 
 ```bash
-set -eu                               # abort on error / unset var
-cd /dust3r                            # repo root (bind-mounted host repo)
-/dust3r/docker/files/prepare_co3d.sh  # one-time bootstrap of prerequisites  ← TODO
-exec python train.py ...              # replace shell with the trainer (PID 1)
+set -eu                                   # abort on error / unset var
+cd /dust3r                                # repo root (bind-mounted host repo)
+/dust3r/docker/files/prepare_overmaps.sh  # one-time prerequisite check/fetch
+exec python -u train.py ...               # replace shell with the trainer (PID 1)
 ```
 
-- The bootstrap script is idempotent: it downloads/preprocesses data and fetches
-  the CroCo v2 checkpoint into `checkpoints/`. Both persist on the host and are
-  skipped on later runs.
+- `prepare_overmaps.sh` is idempotent: it fetches the CroCo v2 checkpoint into
+  `checkpoints/` if missing, and **checks** (does not generate) the preprocessed
+  data at `data/overmaps_processed/`, erroring out with the preprocess command if
+  it's absent. Preprocessing is a deliberate manual step (needs the raw OverMaps
+  data + pycolmap) — run `datasets_preprocess/preprocess_overmaps.py` yourself.
+- `python -u` keeps stdout unbuffered so progress streams live into the Slurm
+  `.out` log instead of flushing only at epoch boundaries.
 - `exec` replaces the shell with Python so signals (Ctrl-C, docker/SLURM stop)
   reach the trainer directly.
 - `train.py` is a 3-line shim calling `get_args_parser()` + `train(args)` from
   `dust3r/training.py`.
-
-> **TODO:** replace `prepare_co3d.sh` with an OverMaps-specific bootstrap
-> (or prepare the data manually and remove the call). The bootstrap must place
-> data in the layout the `OverMaps` dataset class expects and ensure the
-> `--pretrained` checkpoint is present.
 
 ## 2. The key mechanism: eval()'d expression strings
 
@@ -51,32 +53,36 @@ exec python train.py ...              # replace shell with the trainer (PID 1)
 `training.py` does `from dust3r.losses import *`, imports the model, the dataset
 classes from `dust3r/datasets/__init__.py`, etc.
 
-> **TODO:** the `OverMaps` dataset class must be importable from
-> `dust3r/datasets/__init__.py` for its name to be usable in `--train_dataset`.
+The `OverMaps` dataset class (`dust3r/datasets/overmaps.py`) is re-exported from
+`dust3r/datasets/__init__.py`, so the name `OverMaps` is valid in the
+`--train_dataset` / `--test_dataset` strings.
 
 ## 3. Flag-by-flag
 
 ### Datasets — `"N @ DatasetCls(args)"`
 
-Current placeholder (Co3d, to be replaced):
-
 ```
---train_dataset "1000 @ Co3d(split='train', ROOT='data/co3d_subset_processed',
-                             aug_crop=16, mask_bg='rand',
-                             resolution=224, transform=ColorJitter)"
---test_dataset  "100  @ Co3d(split='test',  ROOT='data/co3d_subset_processed',
-                             resolution=224, seed=777)"
+--train_dataset "1680 @ OverMaps(split='train', ROOT='data/overmaps_processed',
+                                 aug_crop=16, resolution=224, transform=ColorJitter)"
+--test_dataset  "80   @ OverMaps(split='test',  ROOT='data/overmaps_processed',
+                                 resolution=224, seed=777)"
 ```
 
-- `N @` is a per-epoch sample-count weight (1000 train pairs, 100 eval pairs).
-  Multiple datasets can be summed with `+`.
-- `aug_crop=16`, `mask_bg='rand'`, `transform=ColorJitter` are **train-only
-  augmentations**. Eval uses none and a fixed `seed=777` for reproducibility.
+- `N @` is a per-epoch sample-count weight; multiple datasets can be summed with
+  `+`. The counts above (1680 train / 80 test) cover the full preprocessed set —
+  there are 1687 train / 81 test pairs — rounded down to multiples of the
+  effective batch. Adjust if you reprocess more OverMaps scenes.
+- The train/test split is **per-pair**, stored as the 4th field of each entry in
+  each scene's `pairs.json`; the `OverMaps` loader keeps only pairs whose tag
+  matches `split`. So one preprocessed scene already yields both splits.
+- `aug_crop=16` and `transform=ColorJitter` are **train-only** augmentations
+  (`OverMaps` has no `mask_bg`, unlike Co3d). Eval uses none and a fixed
+  `seed=777` for reproducibility.
 - `resolution=224` matches the model `img_size`.
 
-> **TODO:** replace `Co3d(...)` with `OverMaps(...)`, point `ROOT` at the
-> preprocessed data directory, set appropriate sample counts, and decide which
-> augmentations apply.
+> **Caveat:** the current `data/overmaps_processed/` holds a *single* scene, so
+> 100 epochs memorise rather than generalise — this is really an overfit/
+> fine-tune experiment until more scenes are preprocessed.
 
 ### Model — the asymmetric Siamese ViT
 
@@ -184,67 +190,84 @@ trained with — hence it pairs with the `--pretrained` line below.
 --pretrained "checkpoints/CroCo_V2_ViTLarge_BaseDecoder.pth"
 ```
 
-Initializes from the CroCo v2 backbone (currently fetched by the placeholder
-`prepare_co3d.sh`). In the full 3-stage curriculum, later stages point this at
-the previous stage's `checkpoint-best.pth` instead.
+Initializes from the CroCo v2 backbone, fetched by `prepare_overmaps.sh` if
+missing. In the full 3-stage curriculum, later stages point this at the previous
+stage's `checkpoint-best.pth` instead.
 
-> **TODO:** decide whether to fine-tune from the published DUSt3R 224 checkpoint
-> or warm-start from the raw CroCo v2 backbone, and update this path accordingly.
-> The bootstrap script must ensure the chosen checkpoint is present.
+> **Auto-resume gotcha:** `train.py` looks for `checkpoint-last.pth` in
+> `--output_dir` and, if found, resumes from it and **ignores `--pretrained`**.
+> So this CroCo warm-start only happens when the output dir is empty — see the
+> note in the checkpointing section below.
 
 ### Optimization / schedule
 
 ```
---lr 0.0001 --min_lr 1e-06 --warmup_epochs 1 --epochs 10
---batch_size 4 --accum_iter 1 --num_workers 0
+--lr 0.0001 --min_lr 1e-06 --warmup_epochs 10 --epochs 100
+--batch_size 4 --accum_iter 4 --num_workers 8
 ```
 
-- Absolute LR `1e-4`, cosine-decayed to `1e-6`, 1 warmup epoch, 10 epochs total
-  (demo-sized; real runs are far longer).
-- `batch_size 4` per GPU; `accum_iter 1` = no gradient accumulation (raise to
-  grow effective batch under tight GPU memory).
-- `num_workers 0` loads data in the main process — simple/safe in a container
-  (avoids `/dev/shm` issues), at the cost of speed.
+- Absolute LR `1e-4`, cosine-decayed to `1e-6`, 10 warmup epochs, 100 epochs
+  total — matching the reference DUSt3R stage-1 (224 linear) schedule.
+- **Effective batch 16 = `batch_size 4` × `accum_iter 4`.** The reference uses
+  `batch_size 16 / accum_iter 1`, but a full ViT-Large fine-tune at bs16 OOMs a
+  32 GB V100; splitting it into 4 micro-batches keeps the optimizer identical
+  while peaking ~14 GB, so it fits whatever GPU the scheduler hands the job. On a
+  bigger card (A100/H100/H200) raise `batch_size` and drop `accum_iter` to go
+  faster.
+- `num_workers 8` matches the 8 CPUs the Slurm job requests; with `num_workers 0`
+  the data pipeline runs in the main process and starves a fast GPU (it was the
+  bottleneck — the GPU sat idle waiting on serial image decode/crop).
 
-> **TODO:** tune epochs / LR / batch size once the size of OverMaps and the
-> GPU budget are known. Mostly knobs, not structural.
+> Tune epochs / LR / batch size as the OverMaps dataset grows; these are knobs,
+> not structural. The architecture and losses below stay fixed to keep the
+> CroCo warm-start valid.
 
 ### Checkpointing / eval cadence + output
 
 ```
---save_freq 1 --keep_freq 5 --eval_freq 1
---output_dir "checkpoints/dust3r_demo_224"
+--save_freq 1 --keep_freq 20 --eval_freq 1
+--output_dir "checkpoints/dust3r_overmaps_224_full"
 ```
 
 - `eval_freq 1` eval every epoch; `save_freq 1` write `checkpoint-last.pth`
-  every epoch; `keep_freq 5` keep permanent `checkpoint-5.pth`, `-10.pth`, …;
-  `checkpoint-best.pth` written on eval improvement.
-- Outputs land in `checkpoints/dust3r_demo_224/` under the bind-mounted repo, so
-  they survive after the container exits.
+  every epoch; `keep_freq 20` keep permanent `checkpoint-20.pth`, `-40.pth`, …
+  (each ~6 GB, so `keep_freq 20` over 100 epochs keeps ~5 of them rather than the
+  20 that `keep_freq 5` would hoard); `checkpoint-best.pth` written on eval
+  improvement.
+- Outputs land in `checkpoints/dust3r_overmaps_224_full/` under the bind-mounted
+  repo, so they survive after the container exits.
 
-> **TODO:** change `--output_dir` to something OverMaps-specific (e.g.
-> `checkpoints/dust3r_overmaps_224`) so it doesn't collide with the Co3d run.
+> **Use a fresh `--output_dir` per run.** `train.py` auto-resumes from a
+> `checkpoint-last.pth` found in the dir (and then ignores `--pretrained` — see
+> Warm start). Pointing a new run at a previous run's dir silently *continues*
+> that run with its old optimizer state instead of warm-starting clean from
+> CroCo. This is also handy on purpose: bump `TIME`/`--epochs` and resubmit to
+> resume an interrupted run from where it stopped.
 
-## 4. Scale: current placeholder vs. a real OverMaps run
+## 4. Scale: this run vs. the full curriculum
 
-The current entrypoint is a minimal smoke-test config (1000 train pairs, 10
-epochs, linear head, 224 res). A real OverMaps run will need more pairs and
-more epochs; the full DUSt3R recipe is a 3-stage curriculum
-(224 linear → 512 linear → 512 dpt), each stage warm-started from the previous
-stage's `checkpoint-best.pth`, using `--model "...(patch_embed_cls='ManyAR_PatchEmbed')"`
-for mixed aspect ratios — see repo-root README "Our Hyperparameters".
+The entrypoint now runs **stage 1 only** (224 linear, 100 epochs). The full
+DUSt3R recipe is a 3-stage curriculum (224 linear → 512 linear → 512 dpt), each
+stage warm-started from the previous stage's `checkpoint-best.pth`, using
+`--model "...(patch_embed_cls='ManyAR_PatchEmbed')"` for mixed aspect ratios and
+`head_type='dpt'` + `resolution=512` for the high-res stages — see repo-root
+README "Our Hyperparameters". To run the later stages, copy this entrypoint,
+swap `head_type`/`resolution`/`img_size` and point `--pretrained` at the prior
+stage's checkpoint. The main bottleneck to a *general* model is data: preprocess
+more OverMaps scenes (a single scene overfits — see §3 caveat).
 
-## 5. OverMaps TODO checklist
+## 5. OverMaps setup checklist
 
 | Part | Status |
 |------|--------|
-| `OverMaps` dataset class in `dust3r/datasets/` | **TODO — new code** |
-| Export from `dust3r/datasets/__init__.py` | **TODO** |
-| Bootstrap script (`prepare_overmaps.sh` or manual data prep) | **TODO** |
-| Replace `prepare_co3d.sh` call in entrypoint | **TODO** |
-| `--train_dataset` / `--test_dataset` strings → `OverMaps(...)` | **TODO** |
-| `--output_dir` → `checkpoints/dust3r_overmaps_224` | **TODO** |
-| `--pretrained` → DUSt3R 224 checkpoint (or CroCo backbone) | **TODO** |
-| `--lr` / `--epochs` / `--batch_size` tuning | tune once data size is known |
-| `--model` architecture | keep as-is |
-| `--train_criterion` / `--test_criterion` | keep as-is |
+| `OverMaps` dataset class in `dust3r/datasets/overmaps.py` | ✅ done |
+| Export from `dust3r/datasets/__init__.py` | ✅ done |
+| Bootstrap script `prepare_overmaps.sh` (checks data, fetches CroCo) | ✅ done |
+| `prepare_overmaps.sh` wired into the entrypoint | ✅ done |
+| `--train_dataset` / `--test_dataset` strings → `OverMaps(...)` | ✅ done |
+| `--output_dir` → `checkpoints/dust3r_overmaps_224_full` | ✅ done |
+| `--pretrained` → CroCo v2 backbone | ✅ done |
+| `--lr` / `--epochs` / `--batch_size` → reference stage-1 (bs16 via accum) | ✅ done |
+| `--model` architecture | unchanged (keeps warm-start valid) |
+| `--train_criterion` / `--test_criterion` | unchanged |
+| Preprocess more scenes / run 512 stages | ⬜ next, when needed |
