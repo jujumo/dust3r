@@ -26,6 +26,7 @@ import os
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"  # must precede cv2 import (EXR depth)
 
 import argparse
+import csv
 import itertools
 import json
 import os.path as osp
@@ -48,6 +49,13 @@ def get_parser():
     parser.add_argument("--overmaps_dir", required=True,
                         help="raw OverMaps root (contains sparse/, images/, depths/, masks_images/)")
     parser.add_argument("--output_dir", default="data/overmaps_processed")
+    parser.add_argument("--manifest", default=None,
+                        help="dataset_manifest.csv (default: <overmaps_dir>/dataset_manifest.csv). "
+                             "Scenes are filtered to those with lidar depth, i.e. a non-empty "
+                             "depths_path. If no manifest is found, every scene under sparse/ is used.")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="reprocess a scene even if its output pairs.json already exists "
+                             "(default: skip done scenes, so the job is resumable)")
     parser.add_argument("--img_size", type=int, default=512,
                         help="lower dimension will be >= img_size*3/4, max dimension >= img_size")
     parser.add_argument("--far_thresh", type=float, default=24.0,
@@ -226,23 +234,58 @@ def process_scene(scene, overmaps_dir, output_dir, args, rng):
     return len(saved), len(pairs)
 
 
-def main():
-    args = get_parser().parse_args()
-    assert args.overmaps_dir != args.output_dir
+def list_lidar_scenes(args):
+    """Scene ids to process: those with lidar depth (non-empty depths_path in the
+    manifest), or, if no manifest is found, every scene under sparse/."""
+    manifest = args.manifest or osp.join(args.overmaps_dir, "dataset_manifest.csv")
+    if osp.isfile(manifest):
+        scenes = []
+        with open(manifest, newline="") as f:
+            for row in csv.DictReader(f):
+                if row.get("depths_path", "").strip():  # has lidar depth
+                    scenes.append(row["mapping_id"])
+        print(f"manifest {manifest}: {len(scenes)} scene(s) with lidar depth")
+        return sorted(scenes)
     sparse_root = osp.join(args.overmaps_dir, "sparse")
     scenes = sorted(d for d in os.listdir(sparse_root)
                     if osp.isdir(osp.join(sparse_root, d)))
-    print(f"found {len(scenes)} scene(s) under {sparse_root}")
+    print(f"no manifest; using all {len(scenes)} scene(s) under {sparse_root}")
+    return scenes
+
+
+def scene_inputs_ready(overmaps_dir, scene):
+    """True iff every raw modality the preprocessor reads is materialized on disk."""
+    needed = [osp.join("sparse", scene, "0"), osp.join("images", scene),
+              osp.join("depths", scene), osp.join("masks_images", scene)]
+    return all(osp.isdir(osp.join(overmaps_dir, p)) for p in needed)
+
+
+def main():
+    args = get_parser().parse_args()
+    assert args.overmaps_dir != args.output_dir
+    scenes = list_lidar_scenes(args)
     os.makedirs(args.output_dir, exist_ok=True)
 
     rng = np.random.default_rng(args.seed)
     tot_frames = tot_pairs = 0
+    n_done = n_skipped_existing = n_skipped_missing = 0
     for scene in scenes:
+        if not args.overwrite and osp.isfile(osp.join(args.output_dir, scene, "pairs.json")):
+            n_skipped_existing += 1
+            continue
+        if not scene_inputs_ready(args.overmaps_dir, scene):
+            n_skipped_missing += 1
+            continue
         nf, npairs = process_scene(scene, args.overmaps_dir, args.output_dir, args, rng)
         tot_frames += nf
         tot_pairs += npairs
-    print(f"DONE: {len(scenes)} scenes, {tot_frames} frames, {tot_pairs} pairs "
-          f"-> {args.output_dir}")
+        n_done += 1
+    print(f"DONE: processed {n_done} scene(s) ({tot_frames} frames, {tot_pairs} pairs); "
+          f"skipped {n_skipped_existing} already-done, {n_skipped_missing} not-yet-materialized "
+          f"(missing images/depths/masks/sparse) -> {args.output_dir}")
+    if n_skipped_missing:
+        print(f"NOTE: {n_skipped_missing} lidar scene(s) lack materialized inputs (e.g. images/); "
+              f"re-run this command after materializing them to pick them up incrementally.")
 
 
 if __name__ == "__main__":
